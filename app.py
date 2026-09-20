@@ -1236,6 +1236,14 @@ def main():
             d.setdefault("source", "manual")
             d.setdefault("watched_at", None)
             d.setdefault("keep", False)
+            if looks_like_url(d.get("title")) and d.get("filepath"):
+                # запись со времён обрыва сети — восстановить название из имени файла
+                t, vid = title_from_filename(d["filepath"])
+                if t:
+                    d["title"] = t
+                    log("BACKFILL", t[:80])
+                if vid and not d.get("video_id"):
+                    d["video_id"] = vid
         for q in state["queue"]:
             q.setdefault("source", "manual")
         for pl in state["playlists"]:
