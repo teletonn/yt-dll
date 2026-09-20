@@ -1,0 +1,14 @@
+[Unit]
+Description=yt-dll — Web UI очередь загрузок yt-dlp
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/al/code/yt-dll
+ExecStart=/usr/bin/python3 /home/al/code/yt-dll/app.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

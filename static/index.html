@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>yt-dll — загрузчик видео</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="bg"><div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div></div>
+
+<header class="glass topbar">
+  <div class="logo">▶ <span>yt-dll</span></div>
+  <nav class="tabs">
+    <button class="tab active" data-tab="queue">Очередь <span id="badge-queue" class="badge hidden">0</span></button>
+    <button class="tab" data-tab="downloaded">Загруженные <span id="badge-dl" class="badge hidden">0</span></button>
+    <button class="tab" data-tab="playlists">Плейлисты</button>
+    <button class="tab" data-tab="settings">⚙ Настройки</button>
+  </nav>
+  <div id="net-status" class="net" title="Состояние сервиса">●</div>
+</header>
+
+<main>
+  <!-- QUEUE -->
+  <section id="tab-queue" class="tabpage">
+    <div class="glass card addbar">
+      <input id="url-input" type="url" placeholder="Вставьте ссылку YouTube…  (Enter — добавить)" autocomplete="off">
+      <button id="btn-preview" class="btn ghost">Инфо</button>
+      <button id="btn-add" class="btn primary">＋ В очередь</button>
+    </div>
+    <div id="preview" class="glass card preview hidden"></div>
+    <div id="now-downloading"></div>
+    <div id="queue-list" class="list"></div>
+  </section>
+
+  <!-- DOWNLOADED -->
+  <section id="tab-downloaded" class="tabpage hidden">
+    <div class="glass card row">
+      <input id="search-input" type="search" placeholder="Поиск по загруженным…">
+      <span id="dl-count" class="muted"></span>
+    </div>
+    <div id="dl-list" class="grid"></div>
+  </section>
+
+  <!-- PLAYLISTS -->
+  <section id="tab-playlists" class="tabpage hidden">
+    <div class="glass card row">
+      <input id="pl-name" placeholder="Название нового плейлиста…">
+      <button id="btn-pl-create" class="btn primary">＋ Создать</button>
+    </div>
+    <div id="pl-list" class="list"></div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section id="tab-settings" class="tabpage hidden">
+    <div class="glass card">
+      <h2>Качество и звук</h2>
+      <label class="field">Максимальное разрешение
+        <select id="set-resolution">
+          <option value="360">360p</option>
+          <option value="480">480p</option>
+          <option value="720" selected>720p (по умолчанию)</option>
+          <option value="1080">1080p</option>
+          <option value="2160">4K</option>
+          <option value="best">Максимальное</option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" id="set-ru" checked> Предпочитать русскую аудиодорожку</label>
+      <p class="muted small">Субтитры не скачиваются. Видео склеивается в MP4. Имена файлов: «Название [id].mp4», кириллица сохраняется.</p>
+    </div>
+
+    <div class="glass card">
+      <h2>Соединение (прокси / VPN)</h2>
+      <p class="muted small">По умолчанию — <b>прямое подключение хоста</b> (как yt-dlp в терминале; если поднят VPN — трафик идёт через него).</p>
+      <label class="check"><input type="checkbox" id="set-proxy-on"> Использовать прокси</label>
+      <label class="field">Прокси URL
+        <input id="set-proxy-url" placeholder="socks5://127.0.0.1:1080  или  http://user:pass@host:port">
+      </label>
+    </div>
+
+    <div class="glass card">
+      <h2>Cookies из браузера</h2>
+      <p class="muted small">Нужно, если YouTube требует вход («Sign in to confirm», возрастные ограничения).
+      Cookies извлекаются локально через yt-dlp (<code>--cookies-from-browser</code>) и хранятся в <code>cookies.txt</code> рядом с app.py.</p>
+      <label class="field">Браузер
+        <select id="set-browser">
+          <option value="chromium" selected>Chromium (этот хост, Omarchy)</option>
+          <option value="chrome">Chrome</option>
+          <option value="brave">Brave</option>
+          <option value="firefox">Firefox</option>
+          <option value="edge">Edge</option>
+          <option value="opera">Opera</option>
+          <option value="vivaldi">Vivaldi</option>
+        </select>
+      </label>
+      <div class="row wrap">
+        <button id="btn-cookies" class="btn primary">⤓ Скопировать cookies из браузера</button>
+        <button id="btn-cookies-clear" class="btn danger">Удалить cookies.txt</button>
+      </div>
+      <label class="check"><input type="checkbox" id="set-use-cookies"> Использовать cookies.txt при загрузке</label>
+      <div id="cookies-status" class="muted small"></div>
+    </div>
+
+    <div class="glass card">
+      <button id="btn-save-settings" class="btn primary big">💾 Сохранить настройки</button>
+      <span id="settings-saved" class="muted"></span>
+    </div>
+  </section>
+</main>
+
+<!-- Player modal -->
+<div id="player-modal" class="modal hidden">
+  <div class="modal-box glass">
+    <div class="modal-head">
+      <div id="player-title" class="modal-title"></div>
+      <button id="player-close" class="btn ghost">✕</button>
+    </div>
+    <video id="player" controls playsinline preload="metadata"></video>
+    <div class="row between">
+      <button id="player-prev" class="btn ghost">⏮ Назад</button>
+      <button id="player-next" class="btn ghost">Вперёд ⏭</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>
