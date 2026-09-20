@@ -15,6 +15,7 @@
     <button class="tab active" data-tab="queue">Очередь <span id="badge-queue" class="badge hidden">0</span></button>
     <button class="tab" data-tab="downloaded">Загруженные <span id="badge-dl" class="badge hidden">0</span></button>
     <button class="tab" data-tab="playlists">Плейлисты</button>
+    <button class="tab" data-tab="channels">Каналы <span id="badge-ch" class="badge hidden">0</span></button>
     <button class="tab" data-tab="settings">⚙ Настройки</button>
   </nav>
   <div id="net-status" class="net" title="Состояние сервиса">●</div>
@@ -29,6 +30,22 @@
       <button id="btn-add" class="btn primary">＋ В очередь</button>
     </div>
     <div id="preview" class="glass card preview hidden"></div>
+    <div class="glass card row between">
+      <button id="btn-pause" class="btn primary">⏸ Пауза</button>
+      <span id="paused-hint" class="muted small"></span>
+      <select id="q-filter" title="Фильтр">
+        <option value="all">Все загрузки</option>
+        <option value="manual">Только ручные</option>
+        <option value="channel">Только авто</option>
+      </select>
+      <select id="q-sort" title="Сортировка">
+        <option value="order">По порядку очереди</option>
+        <option value="pub">Сначала новые (по дате публикации)</option>
+        <option value="title">По названию</option>
+        <option value="added">По дате добавления</option>
+      </select>
+    </div>
+    <div id="paused-banner" class="glass card pause-banner hidden">⏸ Загрузки на паузе. Нажмите «Продолжить», чтобы докачать с того же места.</div>
     <div id="now-downloading"></div>
     <div id="queue-list" class="list"></div>
   </section>
@@ -37,6 +54,18 @@
   <section id="tab-downloaded" class="tabpage hidden">
     <div class="glass card row">
       <input id="search-input" type="search" placeholder="Поиск по загруженным…">
+      <select id="dl-filter" title="Фильтр">
+        <option value="all">Все</option>
+        <option value="manual">Ручные</option>
+        <option value="channel">Авто</option>
+      </select>
+      <select id="dl-sort" title="Сортировка">
+        <option value="new">Сначала новые (загрузка)</option>
+        <option value="old">Сначала старые (загрузка)</option>
+        <option value="pub">По дате публикации</option>
+        <option value="title">По названию</option>
+        <option value="size">По размеру</option>
+      </select>
       <span id="dl-count" class="muted"></span>
     </div>
     <div id="dl-list" class="grid"></div>
@@ -49,6 +78,25 @@
       <button id="btn-pl-create" class="btn primary">＋ Создать</button>
     </div>
     <div id="pl-list" class="list"></div>
+  </section>
+
+  <!-- CHANNELS -->
+  <section id="tab-channels" class="tabpage hidden">
+    <div class="glass card">
+      <h2>Отслеживаемые каналы</h2>
+      <p class="muted small">Новые видео автоматически встают в очередь с меткой «авто» и после загрузки
+      попадают в конец плейлиста «Подписки». Уже загруженное или просмотренное и удалённое
+      повторно не скачивается. При добавлении канала сразу выполняется первая проверка.</p>
+      <div class="row">
+        <input id="ch-url" type="url" placeholder="Ссылка на канал: https://www.youtube.com/@name …" autocomplete="off">
+      </div>
+      <div class="row wrap">
+        <label class="small muted">Проверять каждые (мин): <input id="ch-interval" type="number" min="5" max="10080" value="60"></label>
+        <label class="small muted">Новых видео за раз: <input id="ch-max" type="number" min="1" max="50" value="5"></label>
+        <button id="btn-ch-add" class="btn primary">＋ Добавить канал</button>
+      </div>
+    </div>
+    <div id="ch-list" class="list"></div>
   </section>
 
   <!-- SETTINGS -->
@@ -112,7 +160,8 @@
 <div id="player-modal" class="modal hidden">
   <div class="modal-box glass">
     <div class="modal-head">
-      <div id="player-title" class="modal-title"></div>
+      <div class="modal-title-block"><div id="player-title" class="modal-title"></div>
+      <div id="player-sub" class="muted small"></div></div>
       <button id="player-close" class="btn ghost">✕</button>
     </div>
     <video id="player" controls playsinline preload="metadata"></video>

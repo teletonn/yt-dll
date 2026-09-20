@@ -116,3 +116,16 @@ video#player{width:100%;max-height:70vh;border-radius:12px;background:#000}
   .addbar .btn{flex:1}
   .grid{grid-template-columns:1fr}
 }
+
+/* пауза / бейджи / каналы / плеер */
+.pause-banner{border-color:var(--amber);color:var(--amber);font-weight:600}
+.st-paused{color:var(--amber)}
+.st-auto{color:var(--accent2)}
+.st-lock{color:var(--green)}
+a.icon-btn{text-decoration:none;display:inline-block;line-height:1.4}
+.row select{flex:0 1 auto;width:auto;min-width:0}
+.row input[type=number]{flex:0 0 80px;min-width:0;width:80px}
+.item-actions input[type=number]{width:80px;padding:6px 8px}
+.item-actions label{display:flex;gap:6px;align-items:center}
+.modal-title-block{flex:1;min-width:0}
+.check input{flex:none}

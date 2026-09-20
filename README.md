@@ -9,6 +9,11 @@
 - Скачивание **строго по очереди** (один воркер), прогресс/скорость/ETA live через polling `/api/state` (1 c)
 - Защита от дублей по `videoId` (очередь + загруженные + файлы на диске)
 - Встроенный плеер (`<video>` с HTTP Range), плейлисты с последовательным проигрыванием
+- Пауза: после (пере)запуска загрузки всегда на паузе — продолжение кнопкой в UI, докачка `.part` с того же места
+- `Playlist_1` — постоянный (удалить нельзя): ручные загрузки append'ятся в конец; live-плеер добрасывает новые без перезагрузки
+- Просмотренное (в `Playlist_1`/`Подписки`): через 30 мин убирается из плейлиста, через 24 ч удаляется файл (кроме 📌 «не удалять»)
+- Раздел «Каналы»: автопроверка (`--flat-playlist`), новые видео — в очередь с меткой «авто» и в конец «Подписки»; реестр `seen` защищает от повторной загрузки уже виденного
+- Кнопка ⬇ «Скачать» — сохранение файла на устройство (удобно по LAN с телефона)
 - Настройки: разрешение, RU-аудио, прокси (`--proxy`, по умолчанию выкл = прямое подключение хоста с учётом VPN), cookies из браузера (`--cookies-from-browser chromium` → `cookies.txt`)
 
 ## Запуск
@@ -33,10 +38,14 @@ systemctl --user enable --now yt-dll.service
 - `GET /api/state` — очередь, загруженные, плейлисты, настройки
 - `GET /api/info?url=` — метаданные без скачивания (+ флаг `duplicate`)
 - `POST /api/add` `{url}` — в очередь
+- `POST /api/pause` `{paused: bool}` — пауза/продолжение (пауза останавливает и текущую загрузку)
+- `POST /api/watched` `{id}` — пометить просмотренным (старт таймеров очистки)
+- `POST /api/keep` `{id, keep}` — флаг «не удалять»
+- `POST /api/channels/add|update|delete|check|list` — отслеживаемые каналы (`{url, interval_min, max_videos, enabled}`)
 - `POST /api/queue/move` `{id, to: up|down|top|<index>}`
 - `POST /api/queue/remove`, `POST /api/queue/retry`
 - `POST /api/settings` `{resolution, prefer_ru_audio, proxy_enabled, proxy_url, use_cookies, cookies_browser}`
 - `POST /api/cookies/export` `{browser}` / `POST /api/cookies/clear`
 - `POST /api/playlists/create|rename|delete|add|remove|move`
 - `POST /api/files/delete` `{filepath}`
-- `GET /videos/<file>` — стриминг с Range
+- `GET /videos/<file>` — стриминг с Range; `?dl=1` — скачать файлом (attachment)
