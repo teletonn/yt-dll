@@ -162,12 +162,13 @@
     <div class="modal-head">
       <div class="modal-title-block"><div id="player-title" class="modal-title"></div>
       <div id="player-sub" class="muted small"></div></div>
+      <button id="player-wide" class="btn ghost" title="Широкий режим — на всю ширину окна">🗖</button>
       <button id="player-close" class="btn ghost">✕</button>
     </div>
     <video id="player" controls playsinline preload="metadata"></video>
-    <div class="row between">
-      <button id="player-prev" class="btn ghost">⏮ Назад</button>
-      <button id="player-next" class="btn ghost">Вперёд ⏭</button>
+    <div class="player-controls">
+      <button id="player-prev" class="pbtn" title="Предыдущее видео"><svg viewBox="0 0 24 24"><path d="M6 4h2.5v16H6zM19.5 4v16L9.5 12z"/></svg></button>
+      <button id="player-next" class="pbtn" title="Следующее видео"><svg viewBox="0 0 24 24"><path d="M15.5 4H18v16h-2.5zM4.5 4v16l10-8z"/></svg></button>
     </div>
   </div>
 </div>

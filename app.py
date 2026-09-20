@@ -143,6 +143,22 @@ def new_id(prefix):
     return f"{prefix}_{int(time.time()*1000)}_{os.urandom(3).hex()}"
 
 
+def looks_like_url(s):
+    return isinstance(s, str) and s.startswith(("http://", "https://"))
+
+
+def title_from_filename(fn):
+    """Название (+video_id) из имени файла вида 'Title [id].f399.mp4[.part]'."""
+    base = os.path.basename(fn or "")
+    if base.endswith(".part"):
+        base = base[:-5]
+    base = re.sub(r"\.[^.]+$", "", base)  # убрать расширение
+    m = re.match(r"^(.*)\s+\[([A-Za-z0-9_-]{11})\](\..*)?$", base)
+    if not m:
+        return None, None
+    return (m.group(1).strip() or None), m.group(2)
+
+
 def format_selector(height):
     if height is None:  # best
         return "bv*+ba/b"
@@ -323,6 +339,38 @@ def fetch_info(url, timeout=120):
     }
 
 
+def enrich_title(qid, url, tries=3):
+    """Подтянуть название/метаданные в элемент очереди, с ретраями при обрыве сети."""
+    info = {"error": "init"}
+    for _ in range(max(1, tries)):
+        with lock:
+            q = find_queue(qid)
+            if q is None or not looks_like_url(q.get("title") or q.get("url")):
+                if q is not None and q.get("title") and q["title"] != q.get("url"):
+                    return  # название уже есть
+            if q is None:
+                return
+        info = fetch_info(url)
+        if "error" not in info:
+            break
+        time.sleep(20)
+    if "error" in info:
+        log("ENRICH FAIL", url[:60], info["error"])
+        return
+    with lock:
+        q = find_queue(qid)
+        if q and (q.get("title") == q.get("url") or not q.get("title")):
+            q["title"] = info.get("title") or q["title"]
+            q["duration"] = info.get("duration")
+            if info.get("video_id"):
+                q["video_id"] = info["video_id"]
+                mark_seen(info["video_id"], q["title"], q.get("source") or "manual")
+            if info.get("upload_date"):
+                q["upload_date"] = info["upload_date"]
+            save_state()
+            log("ENRICH", (q["title"] or "")[:80])
+
+
 def export_cookies(browser, timeout=150):
     """Экспорт cookies из браузера через yt-dlp в cookies.txt."""
     cmd = [YTDLP, "--cookies-from-browser", browser,
@@ -413,6 +461,16 @@ def download_item(item):
                     item["stage"] = "Уже загружено"
                 elif "Destination:" in line:
                     item["stage"] = "Загрузка…"
+                    # название из имени файла yt-dlp — главный источник правды:
+                    # работает даже если fetch_info при добавлении упал (обрыв сети)
+                    if looks_like_url(item.get("title")):
+                        dest = line.split("Destination:", 1)[1].strip()
+                        t, vid = title_from_filename(dest)
+                        if t:
+                            item["title"] = t
+                            log("TITLE", t[:80])
+                        if vid and not item.get("video_id"):
+                            item["video_id"] = vid
                 elif "Merging" in line or "Merger" in line:
                     item["stage"] = "Склейка видео+аудио…"
                     item["progress"] = 99.0
@@ -844,25 +902,9 @@ class Handler(BaseHTTPRequestHandler):
             save_state()
         worker_event.set()
         # обогатить названием в фоне (не блокируем ответ)
-        threading.Thread(target=self._enrich_title, args=(item["id"], url), daemon=True).start()
+        threading.Thread(target=enrich_title, args=(item["id"], url), daemon=True).start()
         with lock:
             self.send_json({"ok": True, "item": item})
-
-    def _enrich_title(self, qid, url):
-        info = fetch_info(url)
-        if "error" in info:
-            return
-        with lock:
-            q = find_queue(qid)
-            if q and (q["title"] == q["url"] or not q.get("title")):
-                q["title"] = info.get("title") or q["title"]
-                q["duration"] = info.get("duration")
-                if info.get("video_id"):
-                    q["video_id"] = info["video_id"]
-                    mark_seen(info["video_id"], q["title"], q.get("source") or "manual")
-                if info.get("upload_date"):
-                    q["upload_date"] = info["upload_date"]
-                save_state()
 
     def api_pause(self, data):
         want = data.get("paused")
@@ -1186,6 +1228,10 @@ def main():
                 q["stage"] = "На паузе"
         state["current_id"] = None
         state["paused"] = True  # после (пере)запуска всегда пауза — снимается из UI
+        for q in state["queue"]:
+            if looks_like_url(q.get("title")) and q.get("status") in ("queued", "error"):
+                # добавлено при обрыве сети — добить названия
+                threading.Thread(target=enrich_title, args=(q["id"], q["url"]), daemon=True).start()
         for d in state["downloaded"]:
             d.setdefault("source", "manual")
             d.setdefault("watched_at", None)

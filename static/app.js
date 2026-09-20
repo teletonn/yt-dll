@@ -474,6 +474,9 @@ async function markCurrentWatched() {
   try { await api("/api/watched", { id: d.id }); } catch (e) { /* silent */ }
 }
 $("#player-close").addEventListener("click", closePlayer);
+$("#player-wide").addEventListener("click", () => {
+  $("#player-modal").classList.toggle("wide");
+});
 $("#player-modal").addEventListener("click", (e) => {
   if (e.target.id === "player-modal") closePlayer();
 });

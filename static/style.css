@@ -129,3 +129,16 @@ a.icon-btn{text-decoration:none;display:inline-block;line-height:1.4}
 .item-actions label{display:flex;gap:6px;align-items:center}
 .modal-title-block{flex:1;min-width:0}
 .check input{flex:none}
+
+/* плеер: иконки вперёд/назад + широкий режим */
+.player-controls{display:flex;gap:10px;justify-content:flex-end;margin-top:10px}
+.pbtn{width:54px;height:54px;border-radius:16px;border:1px solid var(--border);
+  background:linear-gradient(135deg,rgba(124,108,255,.4),rgba(34,211,238,.28));
+  color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.pbtn svg{width:26px;height:26px;fill:currentColor}
+.pbtn:hover{filter:brightness(1.35)}
+.modal.wide{background:rgba(0,0,0,.95)}
+.modal.wide .modal-box{width:min(1600px,100%);background:rgba(0,0,0,.9);
+  border-color:transparent;box-shadow:none}
+.modal.wide video#player{max-height:82vh}
+@media (max-width:640px){.modal.wide video#player{max-height:60vh}}
