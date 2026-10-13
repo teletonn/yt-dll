@@ -92,8 +92,22 @@ dl_item_id = None
 # каналы, по которым прямо сейчас идёт сканирование
 scan_busy = set()
 
+# Кольцевой буфер лога для UI (потокобезопасен через lock).
+# Показывается в очереди снизу, свёрнут по умолчанию.
+LOG_LIMIT = 300
+log_buf = []  # [{t, msg}]
+
 
 def log(*a):
+    msg = " ".join(str(x) for x in a)
+    line = {"t": int(time.time()), "msg": msg[:500]}
+    try:
+        with lock:
+            log_buf.append(line)
+            if len(log_buf) > LOG_LIMIT:
+                del log_buf[:len(log_buf) - LOG_LIMIT]
+    except Exception:
+        pass
     print(f"[{datetime.now().strftime('%H:%M:%S')}]", *a, flush=True)
 
 
@@ -612,13 +626,114 @@ def worker():
         download_item(nxt)
 
 
+ALLOWED_INTERVAL_HOURS = (1, 6, 12, 24, 48)
+
+
+def parse_interval_min(data, default_min=360):
+    """Интервал проверки канала в минутах. UI присылает interval_hours
+    (1/6/12/24/48), старые клиенты — interval_min. Минимум 1 час,
+    максимум 48 часов — проверки корректные и не DDOS-ят YouTube."""
+    data = data or {}
+    if "interval_hours" in data:
+        try:
+            h = int(data.get("interval_hours"))
+        except (TypeError, ValueError):
+            return default_min
+        if h not in ALLOWED_INTERVAL_HOURS:
+            # снап к ближайшему разрешённому
+            h = min(ALLOWED_INTERVAL_HOURS, key=lambda x: abs(x - h))
+        return h * 60
+    try:
+        m = int(data.get("interval_min") or default_min)
+    except (TypeError, ValueError):
+        return default_min
+    # снап произвольных минут к ближайшему разрешённому часу
+    h = round(m / 60)
+    if h < 1:
+        h = 1
+    nearest = min(ALLOWED_INTERVAL_HOURS, key=lambda x: abs(x - h))
+    return nearest * 60
+
+
+def interval_to_hours(interval_min):
+    """Минуты -> ближайший разрешённый час для выпадающего списка."""
+    try:
+        h = round(int(interval_min or 360) / 60)
+    except (TypeError, ValueError):
+        h = 6
+    return min(ALLOWED_INTERVAL_HOURS, key=lambda x: abs(x - h))
+
 # ---------- channels ----------
 
+def normalize_channel_url(url):
+    """Канал без суффикса (/videos|/shorts|/streams|/live) отдаёт вкладки
+    (Videos/Shorts/Live с id вида UC...), а не видео.
+    Поэтому сканируем всегда вкладку /videos — только опубликованные ролики."""
+    u = (url or "").strip().rstrip("/")
+    if not u:
+        return u
+    low = u.lower()
+    for suffix in ("/videos", "/shorts", "/streams", "/live", "/featured",
+                   "/playlists", "/community", "/channels", "/about"):
+        if low.endswith(suffix):
+            return u
+    # /watch?v=... , /playlist?list=... , /@name/video-id — не трогаем
+    if "/watch" in low or "/playlist" in low or "/shorts/" in low or "/live/" in low:
+        return u
+    return u + "/videos"
+
+
+VIDEO_ID_STRICT_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+
+TAB_TITLE_RE = re.compile(r"^\s*(videos|shorts|live|streams|playlists|community|channels|about)\s*$",
+                           re.IGNORECASE)
+
+BAD_TITLE_RE = re.compile(r"\[(private|deleted) video\]|private video|deleted video",
+                           re.IGNORECASE)
+
+
+def is_published_entry(e):
+    """True — только реально опубликованное видео, которое можно качать.
+    Отсекает: вкладки канала (YoutubeTab, UC.../PL...), предстоящие/идущие
+    трансляции, приватные/удалённые заглушки."""
+    if not isinstance(e, dict):
+        return False
+    vid = e.get("id") or ""
+    # id видео — строго 11 символов; UC... (канал), PL... (плейлист) — мусор
+    if not VIDEO_ID_STRICT_RE.match(vid):
+        return False
+    # тип записи: только одиночное видео Youtube, не вкладка/плейлист
+    ie = (e.get("ie_key") or "")
+    tp = (e.get("_type") or "")
+    if ie and ie not in ("Youtube", "YoutubeSearch"):
+        return False
+    if tp and tp not in ("url", "url_transparent", "video"):
+        return False
+    # live-статусы: качаем только завершённые (post_live) и обычные VOD (not_live/None)
+    ls = (e.get("live_status") or "").strip().lower()
+    if ls in ("is_live", "is_upcoming", "postponed", "upcoming"):
+        return False
+    if e.get("is_live"):
+        return False
+    av = (e.get("availability") or "").strip().lower()
+    if av in ("upcoming", "premium_only", "subscriber_only", "needs_auth"):
+        return False
+    title = (e.get("title") or "")
+    if not title or BAD_TITLE_RE.search(title):
+        return False
+    # заголовки вкладок вида "TV Rain - Videos"
+    if title.strip().endswith("- Videos") or TAB_TITLE_RE.match(title.strip()):
+        return False
+    return True
+
+
 def fetch_channel_flat(url, limit, timeout=180):
-    """Плоский список видео канала (новейшие первыми) через yt-dlp."""
+    """Плоский список видео канала (новейшие первыми) через yt-dlp.
+    Сканируется вкладка /videos; возвращаются только опубликованные ролики."""
+    scan_url = normalize_channel_url(url)
     cmd = ([YTDLP, "--flat-playlist", "--dump-single-json", "--no-warnings",
             "--socket-timeout", "25",
-            "--playlist-end", str(max(1, limit))] + net_flags() + [url])
+            "--playlist-end", str(max(1, limit))] + net_flags() + [scan_url])
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -632,19 +747,29 @@ def fetch_channel_flat(url, limit, timeout=180):
         data = json.loads(p.stdout)
     except json.JSONDecodeError:
         return {"error": "не удалось разобрать ответ yt-dlp"}
-    entries = []
-    for e in (data.get("entries") or []):
-        if not isinstance(e, dict) or not e.get("id"):
-            continue
-        entries.append({"id": e["id"], "title": e.get("title") or e["id"],
-                        "upload_date": e.get("upload_date"),
-                        "duration": e.get("duration")})
-    return {"entries": entries,
+    raw = [e for e in (data.get("entries") or [])
+           if isinstance(e, dict) and e.get("id")]
+    published, skipped = [], 0
+    for e in raw:
+        full = {"id": e.get("id"), "title": e.get("title") or e["id"],
+                "upload_date": e.get("upload_date"),
+                "duration": e.get("duration"),
+                "ie_key": e.get("ie_key"), "_type": e.get("_type"),
+                "live_status": e.get("live_status"),
+                "is_live": e.get("is_live"),
+                "availability": e.get("availability")}
+        if is_published_entry(full):
+            published.append(full)
+        else:
+            skipped += 1
+    return {"entries": published, "skipped": skipped, "total": len(raw),
             "channel": data.get("channel") or data.get("uploader") or data.get("title")}
 
 
 def scan_channel(channel_id):
-    """Проверка канала: новейшие max_videos unseen-видео — в очередь."""
+    """Проверка канала: новейшие max_videos unseen ОПУБЛИКОВАННЫХ видео — в очередь.
+    Live/Upcoming/вкладки/приватные заглушки отсекаются и в seen НЕ попадают,
+    чтобы будущее опубликованное видео всё равно скачалось."""
     with lock:
         if channel_id in scan_busy:
             return {"ok": False, "error": "уже проверяется"}
@@ -657,7 +782,13 @@ def scan_channel(channel_id):
         log("SCAN", ch.get("url"))
         res = fetch_channel_flat(ch["url"], limit)
         if "error" in res:
-            log("SCAN FAIL", ch["url"], res["error"])
+            with lock:
+                ch = find_channel(channel_id)
+                if ch is not None:
+                    ch["last_check"] = int(time.time())
+                    ch["last_error"] = res["error"][:300]
+                    save_state()
+            log("SCAN FAIL", ch.get("url") if ch else channel_id, res["error"])
             return {"ok": False, "error": res["error"]}
         with lock:
             ch = find_channel(channel_id)
@@ -665,6 +796,8 @@ def scan_channel(channel_id):
                 return {"ok": False, "error": "канал удалён"}
             if res.get("channel") and not ch.get("name_set"):
                 ch["name"] = res["channel"][:120]
+            # защита от повторов: очередь + загруженные + файлы + seen
+            # (seen хранит только опубликованные/загруженные — правила Этапа 7)
             known = known_ids() | set(state["seen"].keys())
             fresh = [e for e in (res["entries"] or []) if e["id"] not in known]
             take = fresh[:max(1, int(ch.get("max_videos") or 5))]
@@ -685,18 +818,23 @@ def scan_channel(channel_id):
                 })
                 known.add(e["id"])
                 added += 1
-            # всё увиденное помечаем — защита от повторной автозагрузки,
-            # в т.ч. после просмотра+удаления по таймеру
+            # помечаем только опубликованные — защита от повторной автозагрузки,
+            # в т.ч. после просмотра+удаления по таймеру. Неопубликованное
+            # (live/upcoming/табы) НЕ помечаем, иначе оно никогда не скачается.
             for e in (res["entries"] or []):
                 if e["id"] not in state["seen"]:
                     mark_seen(e["id"], e.get("title"), "channel")
             ch["last_check"] = int(time.time())
             ch["last_found"] = added
+            ch["last_skipped"] = int(res.get("skipped") or 0)
+            ch.pop("last_error", None)
             save_state()
         if added:
             worker_event.set()
-        log("SCAN DONE", ch.get("name") or ch["url"], f"+{added}")
-        return {"ok": True, "added": added}
+        log("SCAN DONE", ch.get("name") or ch["url"],
+            f"+{added} опубликовано, пропущено непубликуемого: {res.get('skipped', 0)}")
+        return {"ok": True, "added": added,
+                "skipped": int(res.get("skipped") or 0)}
     finally:
         with lock:
             scan_busy.discard(channel_id)
@@ -741,7 +879,7 @@ def janitor():
                     save_state()
                 due = [c for c in state["channels"]
                        if c.get("enabled", True) and c.get("id") not in scan_busy
-                       and now - int(c.get("last_check") or 0) >= max(5, int(c.get("interval_min") or 60)) * 60]
+                       and now - int(c.get("last_check") or 0) >= max(60, int(c.get("interval_min") or 360)) * 60]
             for c in due:
                 threading.Thread(target=scan_channel, args=(c["id"],), daemon=True).start()
         except Exception as e:
@@ -875,7 +1013,13 @@ class Handler(BaseHTTPRequestHandler):
                 "videos_dir": VIDEOS_DIR,
                 "cookies_present": os.path.exists(COOKIES_FILE),
                 "now": int(time.time()),
+                "log": list(log_buf[-150:]),
             })
+
+    def api_log(self):
+        with lock:
+            self.send_json({"ok": True, "log": list(log_buf[-300:]),
+                            "now": int(time.time())})
 
     def api_add(self, data):
         url = (data.get("url") or "").strip()
@@ -979,14 +1123,137 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"ok": True})
 
     def api_watched(self, data):
+        # TV-клиент (SiTV) шлёт video_id/position/duration/completed;
+        # веб-UI шлёт id (downloaded id). Поддерживаем оба формата.
         did = data.get("id")
+        vid = data.get("video_id")
+        position = data.get("position")
+        duration = data.get("duration")
+        completed = bool(data.get("completed"))
         with lock:
-            d = find_downloaded(did)
+            d = None
+            if did:
+                d = find_downloaded(did)
+            if d is None and vid:
+                for x in state["downloaded"]:
+                    if x.get("video_id") == vid:
+                        d = x
+                        break
             if not d:
                 return self.send_json({"ok": False, "error": "не найдено"}, 404)
             d["watched_at"] = int(time.time())
+            # прогресс просмотра от ТВ (для "продолжить просмотр")
+            if isinstance(position, (int, float)) and position >= 0:
+                d["tv_position"] = int(position)
+            if isinstance(duration, (int, float)) and duration > 0:
+                d["tv_duration"] = int(duration)
+            if completed or (
+                isinstance(position, (int, float))
+                and isinstance(duration, (int, float))
+                and duration > 0 and position / duration > 0.92
+            ):
+                d["tv_completed"] = True
             save_state()
             self.send_json({"ok": True, "watched_at": d["watched_at"]})
+
+    def api_tv_catalog(self):
+        """Каталог для ТВ-клиента (SiTV): загруженное + очередь + прямые stream-URL."""
+        with lock:
+            externals = scan_videos_dir()
+            host = self.headers.get("Host") or f"{HOST}:{PORT}"
+            items = []
+            for d in state["downloaded"] + externals:
+                fn = d.get("filepath") or ""
+                stream = "/videos/" + urllib.parse.quote(fn) if fn else None
+                items.append({
+                    "id": d.get("id"),
+                    "video_id": d.get("video_id"),
+                    "title": d.get("title"),
+                    "filepath": fn,
+                    "filesize": d.get("filesize"),
+                    "duration": d.get("duration"),
+                    "upload_date": d.get("upload_date"),
+                    "downloaded_at": d.get("downloaded_at"),
+                    "watched_at": d.get("watched_at"),
+                    "keep": d.get("keep"),
+                    "source": d.get("source"),
+                    "channel_id": d.get("channel_id"),
+                    "tv_position": d.get("tv_position", 0),
+                    "tv_duration": d.get("tv_duration", 0),
+                    "tv_completed": d.get("tv_completed", False),
+                    "stream_url": f"http://{host}{stream}" if stream else None,
+                })
+            self.send_json({
+                "ok": True,
+                "now": int(time.time()),
+                "paused": state["paused"],
+                "queue": state["queue"],
+                "scanning": sorted(scan_busy),
+                "current_id": state["current_id"],
+                "playlists": state["playlists"],
+                "channels": state["channels"],
+                "items": items,
+            })
+
+    def api_tv_search(self, data):
+        """Поиск/инфо для ТВ: {url} -> метаданные; {query} -> yt-dlp search."""
+        url = (data.get("url") or "").strip()
+        query = (data.get("query") or "").strip()
+        if url:
+            if not url.startswith(("http://", "https://")):
+                return self.send_json({"ok": False, "error": "Нужна http(s) ссылка"}, 400)
+            info = fetch_info(url)
+            if "error" in info:
+                return self.send_json({"ok": False, **info})
+            with lock:
+                dup = bool(info.get("video_id") and info["video_id"] in known_ids())
+            return self.send_json({"ok": True, "duplicate": dup, **info})
+        if query:
+            return self.send_json(self.yt_search(query))
+        return self.send_json({"ok": False, "error": "нужен url или query"}, 400)
+
+    @staticmethod
+    def yt_search(query):
+        """yt-dlp flat-поиск: быстро, без скачивания. До 15 результатов."""
+        safe = re.sub(r"[^\w\s\-а-яА-ЯёЁ]", " ", query or "").strip()[:120]
+        if not safe:
+            return {"ok": False, "error": "пустой запрос"}
+        spec = f"ytsearch15:{safe}"
+        cmd = base_cmd(["--flat-playlist", "--dump-single-json",
+                        "--skip-download", "--no-playlist", spec])
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "error": "таймаут поиска"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+        if p.returncode != 0:
+            err = (p.stderr or "").strip().splitlines()
+            return {"ok": False, "error": err[-1] if err else "ошибка поиска"}
+        try:
+            data = json.loads(p.stdout)
+        except json.JSONDecodeError:
+            return {"ok": False, "error": "не удалось разобрать ответ"}
+        entries = data.get("entries") or []
+        with lock:
+            seen = set(known_ids())
+        out = []
+        for e in entries:
+            if not isinstance(e, dict):
+                continue
+            vid = e.get("id")
+            if not vid or len(vid) != 11:
+                continue
+            out.append({
+                "video_id": vid,
+                "title": e.get("title") or vid,
+                "uploader": e.get("uploader") or e.get("channel"),
+                "duration": e.get("duration"),
+                "thumbnail": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+                "url": f"https://www.youtube.com/watch?v={vid}",
+                "duplicate": vid in seen,
+            })
+        return {"ok": True, "query": safe, "results": out}
 
     def api_keep(self, data):
         did = data.get("id")
@@ -1079,10 +1346,7 @@ class Handler(BaseHTTPRequestHandler):
             url = (data.get("url") or "").strip()
             if not url or not url.startswith(("http://", "https://")):
                 return self.send_json({"ok": False, "error": "Нужна http(s) ссылка на канал"}, 400)
-            try:
-                interval = max(5, min(1440 * 7, int(data.get("interval_min") or 60)))
-            except (TypeError, ValueError):
-                interval = 60
+            interval = parse_interval_min(data, default_min=360)
             try:
                 maxv = max(1, min(50, int(data.get("max_videos") or 5)))
             except (TypeError, ValueError):
@@ -1107,9 +1371,10 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_json({"ok": False, "error": "канал не найден"}, 404)
                 if "enabled" in data:
                     ch["enabled"] = bool(data["enabled"])
-                if "interval_min" in data:
+                if "interval_hours" in data or "interval_min" in data:
                     try:
-                        ch["interval_min"] = max(5, min(1440 * 7, int(data["interval_min"])))
+                        ch["interval_min"] = parse_interval_min(
+                            data, default_min=int(ch.get("interval_min") or 360))
                     except (TypeError, ValueError):
                         pass
                 if "max_videos" in data:
@@ -1147,6 +1412,10 @@ class Handler(BaseHTTPRequestHandler):
         path, qs = parsed.path, urllib.parse.parse_qs(parsed.query)
         if path == "/api/state":
             return self.api_state()
+        if path == "/api/tv/catalog":
+            return self.api_tv_catalog()
+        if path == "/api/log":
+            return self.api_log()
         if path == "/api/info":
             url = (qs.get("url") or [""])[0]
             if not url:
@@ -1176,6 +1445,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.api_retry(data)
         if path == "/api/watched":
             return self.api_watched(data)
+        if path == "/api/tv/watch":
+            return self.api_watched(data)
+        if path == "/api/tv/search":
+            return self.api_tv_search(data)
         if path == "/api/keep":
             return self.api_keep(data)
         if path == "/api/settings":
@@ -1248,6 +1521,22 @@ def main():
             q.setdefault("source", "manual")
         for pl in state["playlists"]:
             pl.setdefault("permanent", False)
+        # Миграция 1: seen — вычистить мусор от старых сканов (вкладки UC...,
+        # плейлисты, "X - Videos"): в seen только настоящие video_id (11 симв).
+        if isinstance(state.get("seen"), dict):
+            bad = [vid for vid, v in state["seen"].items()
+                   if not VIDEO_ID_STRICT_RE.match(vid or "")
+                   or str((v or {}).get("title") or "").strip().endswith("- Videos")]
+            for vid in bad:
+                del state["seen"][vid]
+            if bad:
+                print(f"[migrate] seen: удалено мусорных записей: {len(bad)}", flush=True)
+        # Миграция 2: интервалы каналов — снап к разрешённым часам 1/6/12/24/48
+        for c in state.get("channels", []):
+            try:
+                c["interval_min"] = interval_to_hours(c.get("interval_min")) * 60
+            except Exception:
+                c["interval_min"] = 360
         ensure_special_playlists()
         save_state()
     signal.signal(signal.SIGTERM, shutdown_handler)
