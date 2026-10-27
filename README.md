@@ -49,3 +49,41 @@ systemctl --user enable --now yt-dll.service
 - `POST /api/playlists/create|rename|delete|add|remove|move`
 - `POST /api/files/delete` `{filepath}`
 - `GET /videos/<file>` — стриминг с Range; `?dl=1` — скачать файлом (attachment)
+
+## Контейнеризация (Docker)
+
+Проект содержит готовую контейнеризированную версию для запуска в Docker,
+в том числе на Windows (Docker Desktop). Оригинальный хост-сервис
+(`yt-dll.service`) при этом не меняется и продолжает работать как есть.
+
+- Репозиторий: https://github.com/teletonn/yt-dll
+- Подробный гайд: `DEPLOYMENT.md`
+
+### Быстрый старт (Docker Compose)
+
+```bash
+git clone https://github.com/teletonn/yt-dll.git
+cd yt-dll
+docker compose up -d --build
+```
+
+Интерфейс: `http://localhost:49977` или `http://<IP-хоста>:49977`.
+
+### Данные
+
+Все постоянные данные хранятся в `./data` на хосте:
+- `./data/videos` — скачанные видео
+- `./data/state.json` — очередь, плейлисты, настройки, каналы, seen
+- `./data/cookies.txt` — cookies
+
+При `docker compose down` данные сохраняются. Удаление папки `./data`
+полностью очищает состояние.
+
+### Обновление
+
+```bash
+docker compose build --no-cache
+docker compose up -d
+```
+
+После перезапуска сервис всегда на паузе (`paused=true`) — снимите паузу в UI.
