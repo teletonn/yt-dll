@@ -1,0 +1,20 @@
+services:
+  yt-dll:
+    image: teletonn/yt-dll:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: yt-dll
+    restart: unless-stopped
+    ports:
+      - "49977:49977"
+    volumes:
+      - ./data:/data
+    environment:
+      - YTDLL_DATA_DIR=/data
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:49977/api/state', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

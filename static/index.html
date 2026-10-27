@@ -48,6 +48,11 @@
     <div id="paused-banner" class="glass card pause-banner hidden">⏸ Загрузки на паузе. Нажмите «Продолжить», чтобы докачать с того же места.</div>
     <div id="now-downloading"></div>
     <div id="queue-list" class="list"></div>
+    <details id="dl-log" class="glass card log-panel">
+      <summary><span id="log-title">📋 Лог загрузки</span> <span id="log-count" class="muted small"></span>
+        <span class="muted small">(нажмите, чтобы развернуть)</span></summary>
+      <div id="log-list" class="log-list muted small">Лог пуст.</div>
+    </details>
   </section>
 
   <!-- DOWNLOADED -->
@@ -84,14 +89,23 @@
   <section id="tab-channels" class="tabpage hidden">
     <div class="glass card">
       <h2>Отслеживаемые каналы</h2>
-      <p class="muted small">Новые видео автоматически встают в очередь с меткой «авто» и после загрузки
-      попадают в конец плейлиста «Подписки». Уже загруженное или просмотренное и удалённое
+      <p class="muted small">Новые <b>опубликованные</b> видео автоматически встают в очередь с меткой «авто» и после загрузки
+      попадают в конец плейлиста «Подписки». Трансляции (live/upcoming), вкладки и приватные заглушки
+      пропускаются и не блокируют будущие загрузки. Уже загруженное или просмотренное и удалённое
       повторно не скачивается. При добавлении канала сразу выполняется первая проверка.</p>
       <div class="row">
         <input id="ch-url" type="url" placeholder="Ссылка на канал: https://www.youtube.com/@name …" autocomplete="off">
       </div>
       <div class="row wrap">
-        <label class="small muted">Проверять каждые (мин): <input id="ch-interval" type="number" min="5" max="10080" value="60"></label>
+        <label class="small muted">Проверять каждые:
+          <select id="ch-interval">
+            <option value="1">1 час</option>
+            <option value="6" selected>6 часов</option>
+            <option value="12">12 часов</option>
+            <option value="24">24 часа</option>
+            <option value="48">48 часов</option>
+          </select>
+        </label>
         <label class="small muted">Новых видео за раз: <input id="ch-max" type="number" min="1" max="50" value="5"></label>
         <button id="btn-ch-add" class="btn primary">＋ Добавить канал</button>
       </div>

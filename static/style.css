@@ -130,6 +130,19 @@ a.icon-btn{text-decoration:none;display:inline-block;line-height:1.4}
 .modal-title-block{flex:1;min-width:0}
 .check input{flex:none}
 
+/* лог загрузки: приклеен снизу очереди, свёрнут по умолчанию (<details> без open) */
+.log-panel{position:sticky;bottom:10px;z-index:15;margin-top:14px}
+.log-panel summary{cursor:pointer;font-weight:600;list-style:none;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.log-panel summary::-webkit-details-marker{display:none}
+.log-panel summary::before{content:"▶";font-size:.8rem;color:var(--muted)}
+.log-panel[open] summary::before{content:"▼"}
+.log-list{margin-top:10px;max-height:260px;overflow-y:auto;background:rgba(0,0,0,.35);
+  border:1px solid var(--border);border-radius:12px;padding:10px 12px;
+  font-family:ui-monospace,Menlo,Consolas,monospace;display:flex;flex-direction:column;gap:4px}
+.log-line{overflow-wrap:anywhere;white-space:pre-wrap}
+.log-t{color:var(--muted);margin-right:6px}
+.log-err{color:#fca5a5}
+
 /* плеер: иконки вперёд/назад + широкий режим */
 .player-controls{display:flex;gap:10px;justify-content:flex-end;margin-top:10px}
 .pbtn{width:54px;height:54px;border-radius:16px;border:1px solid var(--border);

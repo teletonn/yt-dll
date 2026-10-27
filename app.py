@@ -31,10 +31,14 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-VIDEOS_DIR = os.path.join(BASE_DIR, "videos")
+# Постоянные данные (видео, state.json, cookies.txt) можно вынести в другой каталог
+# через переменную окружения YT-DLL_DATA_DIR (используется в Docker). По умолчанию
+# данные лежат рядом с кодом — поведение хост-сервиса не меняется.
+DATA_DIR = os.environ.get("YT-DLL_DATA_DIR", BASE_DIR)
+VIDEOS_DIR = os.path.join(DATA_DIR, "videos")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
-STATE_FILE = os.path.join(BASE_DIR, "state.json")
-COOKIES_FILE = os.path.join(BASE_DIR, "cookies.txt")
+STATE_FILE = os.path.join(DATA_DIR, "state.json")
+COOKIES_FILE = os.path.join(DATA_DIR, "cookies.txt")
 YTDLP = shutil.which("yt-dlp") or "yt-dlp"
 
 HOST = "0.0.0.0"

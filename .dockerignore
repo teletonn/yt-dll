@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.gitignore
+.env
+videos/
+*.mp4
+*.part
+state.json
+state.json.tmp
+cookies.txt
+docs/
+__pycache__/
+*.log
+.DS_Store
+Thumbs.db

@@ -86,6 +86,7 @@ function render() {
   renderDownloaded(dl, d.now || Math.floor(Date.now() / 1000));
   renderPlaylists(d.playlists || [], dl, d.settings || {});
   renderChannels(ch, d.scanning || [], d.now || Math.floor(Date.now() / 1000));
+  renderLog(d.log || [], d.queue || []);
   syncLivePlayer(d);
   if (state._settingsLoaded !== true) fillSettings(d.settings || {}, d.cookies_present);
 }
@@ -185,6 +186,36 @@ async function queueAction(id, a) {
 }
 $("#q-filter").addEventListener("change", () => renderQueue(state.data?.queue || []));
 $("#q-sort").addEventListener("change", () => renderQueue(state.data?.queue || []));
+
+/* ----- лог загрузки (снизу очереди, свёрнут по умолчанию) ----- */
+function fmtTime(ts) {
+  const d = new Date(ts * 1000);
+  return d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+function renderLog(entries, queue) {
+  const box = $("#log-list");
+  if (!box) return;
+  const errs = (queue || []).filter((x) => x.status === "error");
+  const cur = (queue || []).find((x) => x.status === "downloading");
+  let head = "";
+  if (cur) head = `● ${esc(cur.title || cur.url)} — ${(cur.progress || 0).toFixed(1)}% ${esc(cur.stage || "")} · `;
+  if (errs.length) head += `✕ ошибок в очереди: ${errs.length} · `;
+  $("#log-count").textContent = head + (entries.length ? "записей: " + entries.length : "");
+  const errsOnly = errs.map((x) => `✕ [очередь] ${x.title || x.url}: ${x.error || x.stage || "ошибка"}`);
+  const lines = [
+    ...errsOnly.map((m) => ({ t: Math.floor(Date.now() / 1000), msg: m, err: true })),
+    ...(entries || []).slice(-150),
+  ].slice(-150);
+  if (!lines.length) {
+    box.innerHTML = "Лог пуст.";
+    return;
+  }
+  box.innerHTML = lines.map((l) =>
+    `<div class="log-line${/ERROR|FAIL|✕|error|ошибк/i.test(l.msg || "") || l.err ? " log-err" : ""}">` +
+    `<span class="log-t">${fmtTime(l.t)}</span> ${esc(l.msg)}</div>`).join("");
+  const det = $("#dl-log");
+  if (det && det.open) box.scrollTop = box.scrollHeight;
+}
 
 /* ----- downloaded ----- */
 function allDownloaded() { return (state.data?.downloaded || []); }
@@ -339,6 +370,14 @@ async function addToPlaylist(d) {
 }
 
 /* ----- channels ----- */
+const HOURS_OPTIONS = [1, 6, 12, 24, 48];
+function hoursFromMin(m) {
+  const h = Math.round((+m || 360) / 60);
+  return HOURS_OPTIONS.reduce((a, b) => (Math.abs(b - h) < Math.abs(a - h) ? b : a));
+}
+function hoursLabel(h) {
+  return h === 1 ? "1 час" : (h === 24 ? "24 часа" : h + " часов");
+}
 function renderChannels(chs, scanning, now) {
   const box = $("#ch-list");
   box.innerHTML = "";
@@ -350,16 +389,23 @@ function renderChannels(chs, scanning, now) {
   chs.forEach((c) => {
     const el = document.createElement("div");
     el.className = "glass item";
+    const chHours = hoursFromMin(c.interval_min);
+    const opts = HOURS_OPTIONS.map((h) =>
+      `<option value="${h}"${h === chHours ? " selected" : ""}>${hoursLabel(h)}</option>`).join("");
+    const errLine = c.last_error ? `<span class="error-text">✕ ${esc(c.last_error)}</span>` : "";
+    const skipLine = (c.last_skipped != null && c.last_skipped > 0)
+      ? `<span>пропущено непубликуемого: ${c.last_skipped}</span>` : "";
     el.innerHTML = `
       <div class="item-top">
         <label class="check" title="Включить/выключить проверки"><input type="checkbox" data-f="enabled" ${c.enabled ? "checked" : ""}></label>
         <div class="item-title">${esc(c.name || c.url)} ${busy.has(c.id) ? '<span class="status st-downloading">проверка…</span>' : ""}</div>
       </div>
       <div class="item-meta"><span class="small">${esc(c.url)}</span>
-        <span>каждые ${c.interval_min} мин</span><span>новых за раз: ${c.max_videos}</span>
-        <span>${c.last_check ? "проверен " + relAgo(c.last_check, now) + " (+" + (c.last_found || 0) + ")" : "ещё не проверялся"}</span></div>
+        <span>каждые ${hoursLabel(chHours)}</span><span>новых за раз: ${c.max_videos}</span>
+        <span>${c.last_check ? "проверен " + relAgo(c.last_check, now) + " (+" + (c.last_found || 0) + ")" : "ещё не проверялся"}</span>${skipLine}</div>
+      ${errLine}
       <div class="item-actions">
-        <label class="small muted">интервал <input type="number" min="5" max="10080" value="${c.interval_min}" data-f="interval_min"></label>
+        <label class="small muted">интервал <select data-f="interval_hours">${opts}</select></label>
         <label class="small muted">за раз <input type="number" min="1" max="50" value="${c.max_videos}" data-f="max_videos"></label>
         <button class="icon-btn" data-a="save">💾</button>
         <button class="icon-btn" data-a="check">↻ проверить сейчас</button>
@@ -372,7 +418,7 @@ function renderChannels(chs, scanning, now) {
     el.querySelector('[data-a="save"]').addEventListener("click", async () => {
       const r = await api("/api/channels/update", {
         id: c.id,
-        interval_min: +el.querySelector('[data-f="interval_min"]').value,
+        interval_hours: +el.querySelector('[data-f="interval_hours"]').value,
         max_videos: +el.querySelector('[data-f="max_videos"]').value,
       });
       if (!r.ok) toast(r.error || "ошибка", true); else toast("Настройки канала сохранены");
@@ -396,7 +442,7 @@ $("#btn-ch-add").addEventListener("click", async () => {
   if (!url) return;
   const r = await api("/api/channels/add", {
     url,
-    interval_min: +$("#ch-interval").value || 60,
+    interval_hours: +$("#ch-interval").value || 6,
     max_videos: +$("#ch-max").value || 5,
   });
   if (!r.ok) { toast(r.error || "не добавлено", true); return; }
